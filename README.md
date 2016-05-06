@@ -86,6 +86,9 @@ status of a probe changes, depending on your configuration. The commands you spe
 have to execute within a certain timeout (default 30sec) or they will be killed.
 The commands are run at the same time in separate goroutines.
 
+If the configuration parameter DryRun is set to true, then the actions will not be
+executed, they will just e printed.
+
 ## Sample configuration file
 ```yaml
 # If you want updates on Slack, you have to provide both the token
@@ -109,6 +112,8 @@ WebHooksTimeout: 2
 EnableHttpStatus: true
 # Bind address
 HttpListenOn: "0.0.0.0:8080"
+# DryRun mode, if true, the actions will not be executed
+DryRun: false
 # Actions ! :D
 Actions:
   # Actions that are run when the Global state of the server changes

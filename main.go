@@ -64,6 +64,7 @@ type Config struct {
     WebHooksTimeout     time.Duration
     EnableHttpStatus    bool
     HttpListenOn        string
+    DryRun              bool
     Actions             struct {
         Global              Action
         Probes              map[string]Action
@@ -209,12 +210,18 @@ func (self *ServerState) LoadFromDirectory(directory string) (error) {
 }
 
 // Executes a shell command, and kills it if it does not terminates in time
-func ExecuteCommandWithTimeout(command string, timeout time.Duration) (error) {
+func ExecuteCommandWithTimeout(command string, timeout time.Duration, dryRun bool) (error) {
     // TODO: Make this configurable
     if timeout == 0 {
         timeout = time.Duration(30)
     }
+
     timeout = timeout * time.Second
+    if dryRun {
+        log.Debug("Would have executed `", command, "` with a ", timeout, " timeout (dry run)")
+        return nil
+    }
+
     log.Debug("Executing command with ",  timeout, " timeout: ", command)
     cmd := exec.Command("/bin/sh", "-c", command)
     if err := cmd.Start(); err != nil {
@@ -237,27 +244,23 @@ func ExecuteCommandWithTimeout(command string, timeout time.Duration) (error) {
 // Executes the commands in an Action object when a certain state is reached
 // The actions are not ran sequencially, the are pretty much ran at
 // the same time within different goroutines
-func ExecStatusChangeCommands(state string, actions Action) (error) {
+func ExecStatusChangeCommands(state string, actions Action, dryRun bool) (error) {
     switch state {
         case "UNKNOWN":
-            log.Debug("Executing UNKNOWN state command")
             for _, command := range actions.OnUnknown {
-                go ExecuteCommandWithTimeout(command.Command, command.Timeout)
+                go ExecuteCommandWithTimeout(command.Command, command.Timeout, dryRun)
             }
         case "CRITICAL":
-            log.Debug("Executing CRITICAL state command")
             for _, command := range actions.OnCritical {
-                go ExecuteCommandWithTimeout(command.Command, command.Timeout)
+                go ExecuteCommandWithTimeout(command.Command, command.Timeout, dryRun)
             }
         case "WARNING":
-            log.Debug("Executing WARNING state command")
             for _, command := range actions.OnWarning {
-                go ExecuteCommandWithTimeout(command.Command, command.Timeout)
+                go ExecuteCommandWithTimeout(command.Command, command.Timeout, dryRun)
             }
         case "OK":
-            log.Debug("Executing OK state command")
             for _, command := range actions.OnOk {
-                go ExecuteCommandWithTimeout(command.Command, command.Timeout)
+                go ExecuteCommandWithTimeout(command.Command, command.Timeout, dryRun)
             }
     }
 
@@ -278,6 +281,7 @@ func InitConfig() {
     viper.SetDefault("WatchInterval", 10)
     viper.SetDefault("EnableHttpStatus", false)
     viper.SetDefault("HttpListenOn", "127.0.0.1:8080")
+    viper.SetDefault("DryRun", false)
 
     viper.SetConfigName("eir")
 
@@ -294,6 +298,10 @@ func InitConfig() {
 
     if Conf.SlackToken != "" && Conf.SlackChannel == "" {
         log.Warning("You provided a SlackToken but no SlackChannel, Slack notifications will be disabled")
+    }
+
+    if Conf.DryRun {
+        log.Warning("DryRun mode is active, none of the actions you specified is going to be executed")
     }
 
     if Conf.Debug == true {
@@ -379,10 +387,10 @@ func main() {
             probesDiff := currentState.GetProbeDiff(&newState)
             for _, probe := range probesDiff {
                 if action, ok := Conf.Actions.Probes[probe.Name]; ok {
-                    ExecStatusChangeCommands(probe.Status, action)
+                    ExecStatusChangeCommands(probe.Status, action, Conf.DryRun)
                 }
             }
-            ExecStatusChangeCommands(newState.Status, Conf.Actions.Global)
+            ExecStatusChangeCommands(newState.Status, Conf.Actions.Global, Conf.DryRun)
             if Conf.SlackToken != "" && Conf.SlackChannel != "" {
                 slackClient := slack.New(Conf.SlackToken)
                 log.Debug("Notifying on Slack")
