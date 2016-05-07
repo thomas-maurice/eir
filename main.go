@@ -21,6 +21,7 @@ import (
     "github.com/nlopes/slack"
     "github.com/spf13/viper"
     "github.com/gorilla/mux"
+    "github.com/spf13/cobra"
     "gopkg.in/yaml.v2"
     "encoding/json"
     "path/filepath"
@@ -88,6 +89,7 @@ type ProbeResult struct {
 type ServerState struct {
     Status              string          `yaml:"Status"`
     Hostname            string          `yaml:"Hostname"`
+    Version             string          `yaml:"Version"`
     Details             []ProbeResult   `yaml:"Details"`
 }
 
@@ -102,7 +104,7 @@ func NewServerState() (ServerState) {
     if err != nil {
         hostname = "Unknown hostname"
     }
-    return ServerState{Status: "UNKNOWN", Hostname: hostname}
+    return ServerState{Status: "UNKNOWN", Hostname: hostname, Version: Version}
 }
 
 // Loads a server state from a file
@@ -362,69 +364,118 @@ func serveHttpStatus(w http.ResponseWriter, r *http.Request) {
     fmt.Fprintln(w, bytes.NewBuffer(jsonBody).String())
 }
 
+// Commands
+
+var RootCmd = &cobra.Command{
+    Use:   "eir",
+    Short: "Simple monitoring and healing software",
+}
+
+var VersionCmd = &cobra.Command{
+    Use:   "version",
+    Short: "Print the version number",
+    Long:  ``,
+    Run: func(cmd *cobra.Command, args []string) {
+        fmt.Println("Eir, version", Version)
+    },
+}
+
+var ConfSampleCmd = &cobra.Command{
+    Use:   "confsample",
+    Short: "Prints a sample configuration file",
+    Long:  ``,
+    Run: func(cmd *cobra.Command, args []string) {
+        fmt.Println(ConfigSample)
+    },
+}
+
+var RunCmd = &cobra.Command{
+    Use:   "run",
+    Short: "Runs the software",
+    Long:  `Runs the software's main loop.
+
+    It will look for the configuration file, run it and loop until you stop it.
+    If you want to daemonize Eir, you have to do it yourself. Using Systemd for
+    instance
+    `,
+    Run: func(cmd *cobra.Command, args []string) {
+        log.Info("Booting up Eir")
+        InitConfig()
+        if Conf.EnableHttpStatus {
+            log.Info("Enabled serving HTTP report on ", Conf.HttpListenOn)
+            statusRouter := mux.NewRouter()
+            statusRouter.HandleFunc("/", serveHttpStatus)
+            go http.ListenAndServe(Conf.HttpListenOn, statusRouter)
+        }
+
+        for {
+            currentState := NewServerState()
+            newState := NewServerState()
+            // No error checking because default state is good enough
+            currentState.LoadFromFile(Conf.StatusFile)
+            err := newState.LoadFromDirectory(Conf.ResultDir)
+            if err != nil {
+                log.Error("Could not load the server's state: ", err)
+            }
+            if !newState.Equals(currentState) {
+                log.Info("State changed from ", currentState.Status, " to ", newState.Status)
+                probesDiff := currentState.GetProbeDiff(&newState)
+                for _, probe := range probesDiff {
+                    if action, ok := Conf.Actions.Probes[probe.Name]; ok {
+                        ExecStatusChangeCommands(probe.Status, action, Conf.DryRun)
+                    }
+                }
+                ExecStatusChangeCommands(newState.Status, Conf.Actions.Global, Conf.DryRun)
+                if Conf.SlackToken != "" && Conf.SlackChannel != "" {
+                    slackClient := slack.New(Conf.SlackToken)
+                    log.Debug("Notifying on Slack")
+                    PostStatusOnSlack(slackClient, Conf.SlackChannel, newState, currentState)
+                }
+                log.Debug("Notifying the webhooks, with a timeout of ", Conf.WebHooksTimeout)
+                for _, url := range Conf.WebHooks {
+                    log.Debug(" - ", url)
+                    jsonBody, err := json.Marshal(&newState)
+                    if err != nil {
+                        log.Error("Could not serialize server state: ", err)
+                        continue
+                    }
+                    request, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+                    if err != nil {
+                        log.Error("Could not create HTTP request: ", err)
+                        continue
+                    }
+                    client := &http.Client{Timeout: Conf.WebHooksTimeout}
+                    resp, err := client.Do(request)
+                    if err != nil {
+                        log.Error("Could not make HTTP request: ", err)
+                        continue
+                    }
+                    resp.Body.Close()
+                }
+            } else {
+                log.Debug("Server status is unchanged")
+            }
+            err = newState.SaveToFile(Conf.StatusFile)
+            if err != nil {
+                log.Error("Could not save the server's state: ", err)
+            }
+            log.Debug("Sleeping ", Conf.WatchInterval)
+            time.Sleep(Conf.WatchInterval)
+        }
+    },
+}
+
+func InitRootCmd() {
+    RootCmd.AddCommand(VersionCmd)
+    RootCmd.AddCommand(RunCmd)
+    RootCmd.AddCommand(ConfSampleCmd)
+}
+
 // Main
 func main() {
-    log.Info("Booting up Eir")
-    InitConfig()
-    if Conf.EnableHttpStatus {
-        log.Info("Enabled serving HTTP report on ", Conf.HttpListenOn)
-        statusRouter := mux.NewRouter()
-        statusRouter.HandleFunc("/", serveHttpStatus)
-        go http.ListenAndServe(Conf.HttpListenOn, statusRouter)
-    }
+    InitRootCmd()
 
-    for {
-        currentState := NewServerState()
-        newState := NewServerState()
-        // No error checking because default state is good enough
-        currentState.LoadFromFile(Conf.StatusFile)
-        err := newState.LoadFromDirectory(Conf.ResultDir)
-        if err != nil {
-            log.Error("Could not load the server's state: ", err)
-        }
-        if !newState.Equals(currentState) {
-            log.Info("State changed from ", currentState.Status, " to ", newState.Status)
-            probesDiff := currentState.GetProbeDiff(&newState)
-            for _, probe := range probesDiff {
-                if action, ok := Conf.Actions.Probes[probe.Name]; ok {
-                    ExecStatusChangeCommands(probe.Status, action, Conf.DryRun)
-                }
-            }
-            ExecStatusChangeCommands(newState.Status, Conf.Actions.Global, Conf.DryRun)
-            if Conf.SlackToken != "" && Conf.SlackChannel != "" {
-                slackClient := slack.New(Conf.SlackToken)
-                log.Debug("Notifying on Slack")
-                PostStatusOnSlack(slackClient, Conf.SlackChannel, newState, currentState)
-            }
-            log.Debug("Notifying the webhooks, with a timeout of ", Conf.WebHooksTimeout)
-            for _, url := range Conf.WebHooks {
-                log.Debug(" - ", url)
-                jsonBody, err := json.Marshal(&newState)
-                if err != nil {
-                    log.Error("Could not serialize server state: ", err)
-                    continue
-                }
-                request, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
-                if err != nil {
-                    log.Error("Could not create HTTP request: ", err)
-                    continue
-                }
-                client := &http.Client{Timeout: Conf.WebHooksTimeout}
-                resp, err := client.Do(request)
-                if err != nil {
-                    log.Error("Could not make HTTP request: ", err)
-                    continue
-                }
-                resp.Body.Close()
-            }
-        } else {
-            log.Debug("Server status is unchanged")
-        }
-        err = newState.SaveToFile(Conf.StatusFile)
-        if err != nil {
-            log.Error("Could not save the server's state: ", err)
-        }
-        log.Debug("Sleeping ", Conf.WatchInterval)
-        time.Sleep(Conf.WatchInterval)
+    if err := RootCmd.Execute(); err != nil {
+        log.Fatal(err)
     }
 }
