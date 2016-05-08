@@ -6,6 +6,13 @@ export GOPATH=`pwd`
 
 go get
 
+echo -e "package main
+
+var WebUITemplate = \`
+`cat webui.html`
+\`
+" > webui.go
+
 if ! [ -z "$1" ] && ! [ -z "$2" ]; then
     export GOOS=$1
     export GOARCH=$2

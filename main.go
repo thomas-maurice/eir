@@ -25,6 +25,7 @@ import (
     "gopkg.in/yaml.v2"
     "encoding/json"
     "path/filepath"
+    "html/template"
     "io/ioutil"
     "net/http"
     "os/exec"
@@ -364,6 +365,21 @@ func serveHttpStatus(w http.ResponseWriter, r *http.Request) {
     fmt.Fprintln(w, bytes.NewBuffer(jsonBody).String())
 }
 
+// Serves the UI corresponding to the monitoring state
+func serveHttpStatusUI(w http.ResponseWriter, r *http.Request) {
+    log.Info("Got asked to serve the webui")
+    w.Header().Set("Content-Type", "text/html")
+    w.WriteHeader(http.StatusOK)
+    tmpl, err := template.New("Webui").Parse(WebUITemplate)
+    if err != nil {
+        fmt.Fprintln(w, err)
+        return
+    }
+    currentState := NewServerState()
+    currentState.LoadFromFile(Conf.StatusFile)
+    tmpl.Execute(w, currentState)
+}
+
 // Commands
 
 var RootCmd = &cobra.Command{
@@ -405,6 +421,7 @@ var RunCmd = &cobra.Command{
             log.Info("Enabled serving HTTP report on ", Conf.HttpListenOn)
             statusRouter := mux.NewRouter()
             statusRouter.HandleFunc("/", serveHttpStatus)
+            statusRouter.HandleFunc("/ui", serveHttpStatusUI)
             go http.ListenAndServe(Conf.HttpListenOn, statusRouter)
         }
 

@@ -40,6 +40,7 @@ Where status is one of `UNKNOWN`, `OK`, `WARNING`, `CRITICAL`.
 * Post JSON object to given URLs when the state of the server changes (webhooks)
 * Perform actions when the state of the server (**or a probe**) changes
 * Expose an HTTP interface so that you can just `curl` the server's status
+* Monitoring UI is also available at `/ui`
 
 ## Examples
 This is for example what you get by curling the HTTP interface:
@@ -48,6 +49,7 @@ curl localhost:7979 2>> /dev/null| jq .
 {
   "Status": "CRITICAL",
   "Hostname": "ljosalfheim.maurice.fr",
+  "Verison": 0.1,
   "Details": [
     {
       "Name": "nginx",

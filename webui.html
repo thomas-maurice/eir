@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css" integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7" crossorigin="anonymous">
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js" integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS" crossorigin="anonymous"></script>
+    <title>Status report {{ .Hostname }} - Eir {{ .Version }}</title>
+  </head>
+  <body>
+      <div class="container">
+            <h1
+            {{ if eq .Status "OK" }}
+            class="bg-success"
+            {{ else if eq .Status "WARNING"}}
+            class="bg-warning"
+            {{ else if eq .Status "CRITICAL"}}
+            class="bg-danger"
+            {{ else if eq .Status "UNKNOWN"}}
+            class="bg-info"
+            {{ end }}
+            > <span class="caret"></span> Status report for {{ .Hostname }}: <b>{{ .Status }}</b></h1>
+            {{ range $probe := .Details }}
+            <h2
+            {{ if eq $probe.Status "OK" }}
+            class="bg-success"
+            {{ else if eq $probe.Status "WARNING"}}
+            class="bg-warning"
+            {{ else if eq $probe.Status "CRITICAL"}}
+            class="bg-danger"
+            {{ else if eq $probe.Status "UNKNOWN"}}
+            class="bg-info"
+            {{ end }}
+            > <span class="caret"></span> Probe status {{ $probe.Name }}: <b>{{ $probe.Status }}</b></h2>
+            {{ if $probe.Text }}
+                <pre>{{ $probe.Text }}</pre>
+            {{ end }}
+            {{ end }}
+        </div>
+  </body>
+</html>
